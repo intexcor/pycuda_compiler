@@ -86,9 +86,31 @@ class CUDAType:
             kind=TypeKind.ARRAY,
             name=f'Array[{self.name}]',
             cuda_name=f'{self.cuda_name}*',
-            size=size * self.size if size > 0 else -1,
+            size=size * self.size if size > 0 else 0,
             element_type=self
         )
+
+    def is_tensor(self) -> bool:
+        return self.kind == TypeKind.ARRAY and self.size < 0  # Convention: negative size (like -rank) or specific flag?
+        # Better: checking name or adding a new Kind. 
+        # For now, let's reuse ARRAY but add 'rank' attribute to CUDAType
+        
+    def tensor_of(self, rank: int) -> CUDAType:
+        """Создаёт тензор этого типа."""
+        t = CUDAType(
+            kind=TypeKind.ARRAY,
+            name=f'Tensor[{self.name}, {rank}]',
+            cuda_name=f'{self.cuda_name}*',
+            element_type=self,
+            size=-rank # abuse size to store negative rank
+        )
+        return t
+        
+    @property
+    def rank(self) -> int:
+        if self.kind == TypeKind.ARRAY and self.size < 0:
+            return -self.size
+        return 0
 
 
 @dataclass
@@ -177,6 +199,7 @@ class IRNodeKind(Enum):
     CAST = auto()
     ARRAY_INIT = auto()
     STRUCT_INIT = auto()
+    TENSOR_SLICE = auto()
 
 
 class BinaryOp(Enum):
@@ -303,6 +326,7 @@ class IRFor(IRNode):
     end: IRNode = None
     step: IRNode = None
     body: List[IRNode] = field(default_factory=list)
+    is_parallel: bool = False
 
 
 @dataclass
@@ -458,3 +482,14 @@ class IRStructInit(IRNode):
     kind: IRNodeKind = IRNodeKind.STRUCT_INIT
     struct_name: str = ''
     field_values: Dict[str, IRNode] = field(default_factory=dict)
+
+
+@dataclass
+class IRTensorSlice(IRNode):
+    """Срез тензора (возвращает под-тензор или элемент)."""
+    kind: IRNodeKind = IRNodeKind.TENSOR_SLICE
+    obj: IRNode = None
+    slices: List[IRNode] = field(default_factory=list)
+    # Metadata for aliasing
+    base_name: Optional[str] = None
+    dim_offset: int = 0

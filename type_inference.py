@@ -14,7 +14,8 @@ from types_ir import (
     IRReturn, IRBreak, IRContinue, IRExprStmt, IRBlock,
     IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
     IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
-    IRArrayInit, IRStructInit, IRNodeKind,
+    IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
+    IRArrayInit, IRStructInit, IRTensorSlice, IRNodeKind,
     BinaryOp, UnaryOp, CompareOp
 )
 
@@ -282,6 +283,25 @@ class TypeInference:
         
         elif isinstance(expr, IRStructInit):
             return self.infer_struct_init(expr)
+        
+        elif isinstance(expr, IRTensorSlice):
+            return self.infer_tensor_slice(expr)
+        
+        return expr.type
+
+    def infer_tensor_slice(self, expr: IRTensorSlice) -> Optional[CUDAType]:
+        """Выводит тип среза тензора."""
+        # Тип уже должен быть установлен парсером, но мы можем проверить
+        if expr.type:
+            return expr.type
+        
+        # Если нет, выводим из объекта
+        obj_type = self.infer_expr(expr.obj)
+        if obj_type and obj_type.is_tensor():
+             # Re-calculate rank logic if needed, but Parser usually does this better 
+             # because it has access to AST structure (indices count).
+             # Start with simple propagation if parser set it.
+             pass
         
         return expr.type
     

@@ -15,7 +15,7 @@ from types_ir import (
     IRReturn, IRBreak, IRContinue, IRExprStmt, IRBlock,
     IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
     IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
-    IRArrayInit, IRStructInit,
+    IRArrayInit, IRStructInit, IRTensorSlice,
     BinaryOp, UnaryOp, CompareOp
 )
 
@@ -71,6 +71,8 @@ class PythonParser:
         self.current_function: Optional[IRFunctionDef] = None
         self.current_class: Optional[str] = None
         self.scope_stack: List[Dict[str, CUDAType]] = [{}]
+        self.tensor_aliases: Dict[str, Tuple[str, int]] = {} # local_name -> (base_param_name, dim_offset)
+        self.loop_depth: int = 0
         
     def parse(self, source: str) -> IRModule:
         """Парсит исходный код Python."""
@@ -248,6 +250,17 @@ class PythonParser:
             if not self.lookup_var(target.id):
                 var_type = value_ir.type if value_ir.type else FLOAT32
                 self.define_var(target.id, var_type)
+            
+            # Tensor Alias Tracking
+            if isinstance(value_ir, IRTensorSlice):
+                # Calculate new offset based on consumed dimensions
+                consumed = len(value_ir.slices)
+                new_offset = value_ir.dim_offset + consumed
+                self.tensor_aliases[target.id] = (value_ir.base_name, new_offset)
+                
+                # Also update the variable type to the slice type
+                if self.current_function:
+                    self.current_function.local_vars[target.id] = value_ir.type
         
         return IRAssign(target=target_ir, value=value_ir, lineno=node.lineno)
     
@@ -315,16 +328,30 @@ class PythonParser:
         var_name = node.target.id
         self.define_var(var_name, INT32)
         
-        # Проверяем range()
-        if isinstance(node.iter, ast.Call):
-            if isinstance(node.iter.func, ast.Name) and node.iter.func.id == 'range':
-                return self.visit_range_for(node, var_name, node.iter)
-            elif isinstance(node.iter.func, ast.Name) and node.iter.func.id == 'len':
-                # for i in range(len(arr)) → parallel for
-                return self.visit_parallel_for(node, var_name, node.iter)
-        
-        # for x in arr → обычный цикл
-        raise ParseError("Only range() loops are supported", node)
+        # Auto-Parallelization Logic
+        should_parallelize = False
+        if self.current_function and self.current_function.is_kernel and self.loop_depth == 0:
+            should_parallelize = True
+
+        self.loop_depth += 1
+        try:
+            # Проверяем range()
+            if isinstance(node.iter, ast.Call):
+                if isinstance(node.iter.func, ast.Name) and node.iter.func.id == 'range':
+                    # Check if parallelization is requested
+                    loop_node = self.visit_range_for(node, var_name, node.iter)
+                    if should_parallelize and isinstance(loop_node, IRFor):
+                         loop_node.is_parallel = True
+                    return loop_node
+                
+                elif isinstance(node.iter.func, ast.Name) and node.iter.func.id == 'len':
+                    # for i in range(len(arr)) → parallel for (Existing explicit logic)
+                    return self.visit_parallel_for(node, var_name, node.iter)
+            
+            # for x in arr → обычный цикл
+            raise ParseError("Only range() loops are supported", node)
+        finally:
+            self.loop_depth -= 1
     
     def visit_range_for(self, node: ast.For, var_name: str, range_call: ast.Call) -> IRNode:
         """Обрабатывает for i in range(...)."""
@@ -401,10 +428,14 @@ class PythonParser:
         
         body = []
         self.push_scope()
-        for stmt in node.body:
-            ir_stmt = self.visit_stmt(stmt)
-            if ir_stmt:
-                body.append(ir_stmt)
+        self.loop_depth += 1
+        try:
+            for stmt in node.body:
+                ir_stmt = self.visit_stmt(stmt)
+                if ir_stmt:
+                    body.append(ir_stmt)
+        finally:
+            self.loop_depth -= 1
         self.pop_scope()
         
         return IRWhile(
@@ -623,6 +654,87 @@ class PythonParser:
         if obj.type and obj.type.element_type:
             elem_type = obj.type.element_type
         
+        # Tensor Slicing Logic
+        if obj.type and obj.type.is_tensor():
+            # Determine base name and offset
+            base_name = ''
+            dim_offset = 0
+            
+            if isinstance(obj, IRVar):
+                if obj.name in self.tensor_aliases:
+                    base_name, dim_offset = self.tensor_aliases[obj.name]
+                else:
+                    base_name = obj.name
+            elif isinstance(obj, IRTensorSlice):
+                base_name = obj.base_name
+                dim_offset = obj.dim_offset + len(obj.slices)
+            
+            # Helper to normalize indices
+            indices = []
+            if isinstance(node.slice, ast.Index): # Py3.7/3.8
+                slice_val = node.slice.value
+                if isinstance(slice_val, ast.Tuple):
+                     for e in slice_val.elts:
+                         indices.append(self.visit_expr(e))
+                else:
+                    indices.append(self.visit_expr(slice_val))
+            elif isinstance(node.slice, ast.Tuple): # Py3.9+
+                for e in node.slice.elts:
+                    indices.append(self.visit_expr(e))
+            else: # Single index
+                indices.append(self.visit_expr(node.slice))
+            
+            # Determine result type
+            # obj.type.rank is the rank of the current object (e.g. 2 for path[i]).
+            # result rank = obj.type.rank - len(indices)
+            current_rank = obj.type.rank
+            res_rank = current_rank - len(indices)
+            
+            res_type = None
+            if res_rank <= 0:
+                res_type = obj.type.element_type # Scalar
+            else:
+                # Create new tensor with same element type but different rank
+                res_type = obj.type.element_type.tensor_of(res_rank)
+            
+            return IRTensorSlice(
+                obj=obj,
+                slices=indices,
+                type=res_type,
+                base_name=base_name,
+                dim_offset=dim_offset,
+                lineno=node.lineno
+            )
+
+        if isinstance(obj, IRAttr) and obj.attr_name == 'shape':
+            # Handle arr.shape[i]
+            target_obj = obj.obj
+            base_name = ''
+            dim_offset = 0
+            
+            if isinstance(target_obj, IRVar):
+                if target_obj.name in self.tensor_aliases:
+                    base_name, dim_offset = self.tensor_aliases[target_obj.name]
+                else:
+                    base_name = target_obj.name
+            
+            # Extract constant index
+            idx_val = -1
+            if isinstance(node.slice, ast.Index):
+                 if isinstance(node.slice.value, (ast.Num, ast.Constant)):
+                     val = node.slice.value.n if isinstance(node.slice.value, ast.Num) else node.slice.value.value
+                     if isinstance(val, int):
+                         idx_val = val
+            elif isinstance(node.slice, (ast.Num, ast.Constant)):
+                 val = node.slice.n if isinstance(node.slice, ast.Num) else node.slice.value
+                 if isinstance(val, int):
+                     idx_val = val
+            
+            if idx_val >= 0:
+                # Return variable referencing the shape argument
+                real_dim = dim_offset + idx_val
+                return IRVar(name=f"_shape_{base_name}_{real_dim}", type=INT32, lineno=node.lineno)
+
         return IRIndex(
             obj=obj,
             index=index,
@@ -678,7 +790,10 @@ class PythonParser:
     
     def visit_tuple(self, node: ast.Tuple) -> IRNode:
         """Обрабатывает кортеж (как массив)."""
-        return self.visit_list(ast.List(elts=node.elts, ctx=node.ctx))
+        list_node = ast.List(elts=node.elts, ctx=node.ctx)
+        list_node.lineno = getattr(node, 'lineno', 0)
+        list_node.col_offset = getattr(node, 'col_offset', 0)
+        return self.visit_list(list_node)
     
     def parse_type_annotation(self, node: ast.expr) -> CUDAType:
         """Парсит аннотацию типа."""
@@ -702,14 +817,38 @@ class PythonParser:
             )
         
         elif isinstance(node, ast.Subscript):
-            # Array[float32], List[int], etc.
+            # Array[float32], List[int], Tensor[float32, 3]
             if isinstance(node.value, ast.Name):
                 container = node.value.id
-                if container in ('Array', 'List', 'Tensor'):
-                    if isinstance(node.slice, ast.Index):
-                        elem_type = self.parse_type_annotation(node.slice.value)
+                
+                # Extract args
+                args = []
+                if isinstance(node.slice, ast.Index):
+                    slice_val = node.slice.value
+                    if isinstance(slice_val, ast.Tuple):
+                        args = slice_val.elts
                     else:
-                        elem_type = self.parse_type_annotation(node.slice)
+                        args = [slice_val]
+                elif isinstance(node.slice, ast.Tuple):
+                    args = node.slice.elts
+                else:
+                    args = [node.slice]
+                
+                if container == 'Tensor' and len(args) >= 2:
+                    # Tensor[type, rank]
+                    elem_type = self.parse_type_annotation(args[0])
+                    # Parse Rank
+                    rank = 1
+                    rank_node = args[1]
+                    if isinstance(rank_node, (ast.Num, ast.Constant)):
+                         val = rank_node.n if isinstance(rank_node, ast.Num) else rank_node.value
+                         if isinstance(val, int):
+                             rank = val
+                    return elem_type.tensor_of(rank)
+                
+                if container in ('Array', 'List', 'Tensor'):
+                    # Array[type] or Tensor[type] (default rank 1)
+                    elem_type = self.parse_type_annotation(args[0])
                     return elem_type.array_of()
         
         return FLOAT32
@@ -728,5 +867,10 @@ class PythonParser:
         # int + int → int
         if left.kind == TypeKind.INT and right.kind == TypeKind.INT:
             return INT32
+        
+        # Pointer arithmetic
+        # Array + int -> Array (effectively pointer)
+        if (left.is_array() or left.is_pointer()) and right.kind == TypeKind.INT:
+            return left
         
         return FLOAT32

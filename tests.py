@@ -466,7 +466,9 @@ def run_all_tests():
             test()
             passed += 1
         except Exception as e:
-            print(f"FAILED: {e}")
+            import traceback
+            print(f"FAILED: {repr(e)}")
+            traceback.print_exc()
             failed += 1
     
     print("=" * 60)

@@ -14,7 +14,8 @@ from types_ir import (
     IRReturn, IRBreak, IRContinue, IRExprStmt, IRBlock,
     IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
     IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
-    IRArrayInit, IRStructInit,
+    IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
+    IRArrayInit, IRStructInit, IRTensorSlice,
     BinaryOp, UnaryOp, CompareOp
 )
 
@@ -222,7 +223,12 @@ class CUDACodeGen:
             self.declared_vars.add(param_name)
             
             # Для массивов добавляем размер
-            if param_type.is_array() or param_type.is_pointer():
+            if param_type.is_tensor():
+                rank = param_type.rank
+                for i in range(rank):
+                    params.append(f'int _shape_{param_name}_{i}')
+                    params.append(f'int _stride_{param_name}_{i}')
+            elif param_type.is_array() or param_type.is_pointer():
                 size_name = f'_size_{param_name}'
                 params.append(f'int {size_name}')
                 self.array_sizes[param_name] = size_name
@@ -333,7 +339,7 @@ class CUDACodeGen:
         return '\n'.join(lines)
     
     def gen_for(self, stmt: IRFor) -> str:
-        """Генерирует обычный for."""
+        """Генерирует ordinary or parallel for."""
         lines = []
         
         var = stmt.var_name
@@ -341,12 +347,21 @@ class CUDACodeGen:
         end = self.gen_expr(stmt.end)
         step = self.gen_expr(stmt.step) if stmt.step else '1'
         
+        # Determine comparison operator
         if isinstance(stmt.step, IRConst) and stmt.step.value < 0:
             cmp = '>'
         else:
             cmp = '<'
-        
-        lines.append(f'{self.indent()}for (int {var} = {start}; {var} {cmp} {end}; {var} += {step}) {{')
+
+        if stmt.is_parallel:
+            # Grid-Stride Loop Logic
+            # for (int var = start + THREAD_ID * step; var < end; var += GRID_STRIDE * step)
+            init = f"{start} + THREAD_ID * ({step})"
+            incr = f"GRID_STRIDE * ({step})"
+            lines.append(f'{self.indent()}for (int {var} = {init}; {var} {cmp} {end}; {var} += {incr}) {{')
+        else:
+            # Standard Loop
+            lines.append(f'{self.indent()}for (int {var} = {start}; {var} {cmp} {end}; {var} += {step}) {{')
         
         self.indent_level += 1
         for s in stmt.body:
@@ -450,8 +465,35 @@ class CUDACodeGen:
             return self.gen_array_init(expr)
         elif isinstance(expr, IRStructInit):
             return self.gen_struct_init(expr)
+        elif isinstance(expr, IRTensorSlice):
+            return self.gen_tensor_slice(expr)
         
         return '/* unknown */'
+    
+    def gen_tensor_slice(self, expr: IRTensorSlice) -> str:
+        """Генерирует срез тензора (pointer arithmetic)."""
+        base = self.gen_expr(expr.obj)
+        offset_parts = []
+        
+        for i, idx in enumerate(expr.slices):
+             real_dim = expr.dim_offset + i
+             idx_str = self.gen_expr(idx)
+             # Use the stride name logic
+             stride_name = f"_stride_{expr.base_name}_{real_dim}"
+             offset_parts.append(f"({idx_str} * {stride_name})")
+             # Note: declared_vars check is implicit? 
+             # Argument variables (like strides) are always available in the function scope.
+        
+        offset = " + ".join(offset_parts)
+        if not offset:
+            offset = "0"
+            
+        # Determine if result is pointer or value
+        # If result type has rank > 0 or is pointer -> offset arithmetic
+        if expr.type.is_array() or expr.type.is_pointer() or expr.type.is_tensor():
+             return f"({base} + {offset})"
+        else: # Scalar access
+             return f"{base}[{offset}]"
     
     def gen_const(self, expr: IRConst) -> str:
         """Генерирует константу."""

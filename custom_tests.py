@@ -39,7 +39,19 @@ def benchmark(name, cpu_func, gpu_program, kernel_name, *args, size=None):
     cpu_time = (time.perf_counter() - start) / 5 * 1000
     
     # GPU
-    gpu_args = [cp.asarray(a) if isinstance(a, np.ndarray) else a for a in args]
+    gpu_args = []
+    for a in args:
+        if isinstance(a, np.ndarray):
+            if a.dtype.names:
+                # Structured array: pass as raw bytes (uint8) + logical size
+                # We view it as uint8 to trick Cupy, but we need to pass the original logical size
+                # so the kernel knows how many ELEMENTS to process
+                gpu_arr = cp.asarray(a.view(np.uint8))
+                gpu_args.append((gpu_arr, a.size))
+            else:
+                gpu_args.append(cp.asarray(a))
+        else:
+            gpu_args.append(a)
     
     # Warmup
     gpu_program.run(kernel_name, *gpu_args)

@@ -153,6 +153,8 @@ class CUDAProgram:
             print(f"Function [{kind}]: {func.name}")
             for name, t in func.params:
                 print(f"  param {name}: {t.name if t else '?'}")
+            for name, t in func.local_vars.items():
+                print(f"  local {name}: {t.name if t else '?'}")
             print(f"  returns: {func.return_type.name if func.return_type else 'void'}")
     
     @property
@@ -282,8 +284,49 @@ extern "C" {{
         cuda_args = []
         size = None
         
+        # Проверяем соответствие аргументов
+        params = kernel_info.params
+        
+        # Args loop
         for i, arg in enumerate(args):
-            if isinstance(arg, cp.ndarray):
+            if i < len(params):
+                param_name, param_type = params[i]
+            else:
+                param_type = None
+
+            # Tensor support
+            if param_type and param_type.is_tensor():
+                 if not isinstance(arg, cp.ndarray):
+                     raise TypeError(f"Argument '{param_name}' must be a Cupy array (expected Tensor)")
+                 
+                 cuda_args.append(arg) # ptr
+                 # Push shapes and strides
+                 rank = param_type.rank
+                 if arg.ndim != rank:
+                      # Allow if rank is -1 (dynamic)? No, we fixed rank in type.
+                      # Maybe just warn or error.
+                      pass
+                 
+                 for d in range(rank):
+                     if d < arg.ndim:
+                         cuda_args.append(arg.shape[d])
+                         cuda_args.append(arg.strides[d] // arg.itemsize)
+                     else:
+                         cuda_args.append(1)
+                         cuda_args.append(0)
+                 
+                 # Use first dimension for default grid size if not set
+                 if size is None and rank > 0:
+                     size = arg.shape[0]
+
+            # Support for manual size override: (array, logical_size)
+            elif isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[0], cp.ndarray):
+                arr, logical_size = arg
+                cuda_args.append(arr)
+                cuda_args.append(logical_size)
+                if size is None:
+                    size = logical_size
+            elif isinstance(arg, cp.ndarray):
                 cuda_args.append(arg)
                 cuda_args.append(arg.size)  # размер массива
                 if size is None:
