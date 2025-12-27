@@ -221,25 +221,36 @@ class CUDACodeGen:
             lines.append(self.gen_optional_struct_def(ot))
             lines.append('')
             
-        # Check for String usage (naive scan or just always include if detected)
-        # For now, let's scan.
+        # Scan for String usage
         has_string = False
-        def scan_string(t: CUDAType):
-             if t and t.kind == TypeKind.STRING:
-                 return True
-             if t and t.element_type:
-                 return scan_string(t.element_type)
-             # ... more recursive checks
-             return False
+        string_checked = set()
+        
+        def scan_string(t: Optional[CUDAType]):
+             nonlocal has_string
+             if has_string or t is None: return
+             if t in string_checked: return
+             string_checked.add(t)
              
-        # Simplify: Just check if STRING appears in types or if we should always generate it?
-        # Always generating it is safer if we don't have perfect scan.
-        # But let's try to be clean.
-        # Actually, let's just generate it if we see TypeKind.STRING in collected types?
-        # I didn't collect all types.
-        # Let's generate it always for now, it's small.
-        lines.append(self.gen_string_struct_def())
-        lines.append('')
+             if t.kind == TypeKind.STRING:
+                 has_string = True
+                 return
+                 
+             if t.element_type:
+                 scan_string(t.element_type)
+             for et in t.element_types:
+                 scan_string(et)
+                 
+        for func in module.functions:
+            if has_string: break
+            scan_string(func.return_type)
+            for _, t in func.params:
+                scan_string(t)
+            for _, t in func.local_vars.items():
+                scan_string(t)
+
+        if has_string:
+            lines.append(self.gen_string_struct_def())
+            lines.append('')
         
         # Scan for Dict types
         dict_types = set()

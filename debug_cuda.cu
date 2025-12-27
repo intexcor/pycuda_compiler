@@ -4,32 +4,6 @@
 #define THREAD_ID (blockIdx.x * blockDim.x + threadIdx.x)
 #define GRID_STRIDE (blockDim.x * gridDim.x)
 
-struct String {
-    char data[64];
-    int length;
-    
-    __device__ String() : length(0) { data[0] = 0; }
-    
-    __device__ String(const char* s) {
-        length = 0;
-        for(int i=0; i<63 && s[i] != 0; ++i) {
-            data[i] = s[i];
-            length++;
-        }
-        data[length] = 0;
-    }
-    
-    __device__ int len() const { return length; }
-    
-    __device__ bool operator==(const String& other) const {
-        if (length != other.length) return false;
-        for(int i=0; i<length; ++i) {
-            if (data[i] != other.data[i]) return false;
-        }
-        return true;
-    }
-};
-
 __global__ void maximum_path_jit(int* paths, int _shape_paths_0, int _stride_paths_0, int _shape_paths_1, int _stride_paths_1, int _shape_paths_2, int _stride_paths_2, float* values, int _shape_values_0, int _stride_values_0, int _shape_values_1, int _stride_values_1, int _shape_values_2, int _stride_values_2, int* t_ys, int _shape_t_ys_0, int _stride_t_ys_0, int* t_xs, int _shape_t_xs_0, int _stride_t_xs_0) {
     int b;
     float max_neg_val;
