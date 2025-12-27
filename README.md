@@ -189,7 +189,5 @@ Python → Parser → IR → Type Inference → CodeGen → CUDA C++ → nvrtc �
 
 ## Лицензия
 
-## Лицензия
-
 **PROPRIETARY SOURCE AVAILABLE**. See [LICENSE](LICENSE) for details.
 Commercial use prohibited.
