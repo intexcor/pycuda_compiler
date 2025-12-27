@@ -1,11 +1,10 @@
 # PyCUDA Compiler: Technical Report
 
-## 1. Introduction / Motivation
+## 1. Introduction
 
-Writing high-performance GPU code in CUDA C++ is powerful but tedious and error-prone.
-Existing tools like Numba, CuPy and Taichi reduce boilerplate, but still require low-level constructs or custom syntax.
+Developing high-performance GPU applications typically involves writing CUDA C++, a process that offers control but comes with significant complexity and boilerplate. While Python ecosystem tools like Numba, CuPy, and Taichi have made strides in accessibility, they often still require developers to understand low-level GPU concepts or use specialized domain-specific languages.
 
-PyCUDA Compiler aims to provide a **seamless Python-to-CUDA compilation** with minimal changes to code, automatic parallelization, and support for high-level data structures (Dict, List, Set, Optional) directly in kernels.
+PyCUDA Compiler addresses this challenge by providing **seamless Python-to-CUDA compilation**. It allows developers to write standard, statically-typed Python code that is automatically compiled into optimized CUDA kernels. Key differentiators include automatic parallelization of native loops and first-class support for high-level data structures—such as `List`, `Dict`, and `Set`—directly within GPU kernels.
 
 ## 2. Architecture Overview
 
