@@ -204,6 +204,8 @@ class CUDACodeGen:
             prefix = '__device__'
         
         return_type = self.type_to_cuda(func.return_type)
+        if func.is_kernel:
+            return_type = 'void'
         
         # Имя функции
         func_name = func.name
@@ -418,6 +420,8 @@ class CUDACodeGen:
     def gen_return(self, stmt: IRReturn) -> str:
         """Генерирует return."""
         if stmt.value:
+            if self.current_function and self.current_function.is_kernel:
+                raise CodeGenError("CUDA kernels cannot return values. Please use output arrays (arguments).")
             return f'{self.indent()}return {self.gen_expr(stmt.value)};'
         return f'{self.indent()}return;'
     
@@ -562,6 +566,15 @@ class CUDACodeGen:
     
     def gen_method_call(self, expr: IRMethodCall) -> str:
         """Генерирует вызов метода."""
+        if expr.method_name == 'append':
+             raise CodeGenError("Dynamic list methods like 'append' are not supported in CUDA kernels. Please use pre-allocated arrays.")
+        
+        # Check for banned usage of host libraries (cp.zeros, np.array etc)
+        if isinstance(expr.obj, IRVar) and expr.obj.name in ('cp', 'np', 'cupy', 'numpy', 'torch'):
+             raise CodeGenError(f"Cannot use host Python library '{expr.obj.name}' inside a CUDA kernel. "
+                                f"GPU code compiles to C++ and cannot access Python objects. "
+                                f"Solution: Allocate arrays on the host and pass them as arguments.")
+
         obj = self.gen_expr(expr.obj)
         args = [self.gen_expr(arg) for arg in expr.args]
         
