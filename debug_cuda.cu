@@ -4,7 +4,7 @@
 #define THREAD_ID (blockIdx.x * blockDim.x + threadIdx.x)
 #define GRID_STRIDE (blockDim.x * gridDim.x)
 
-__global__ void maximum_path_jit(int* paths, int _shape_paths_0, int _stride_paths_0, int _shape_paths_1, int _stride_paths_1, int _shape_paths_2, int _stride_paths_2, float* values, int _shape_values_0, int _stride_values_0, int _shape_values_1, int _stride_values_1, int _shape_values_2, int _stride_values_2, int* t_ys, int _shape_t_ys_0, int _stride_t_ys_0, int* t_xs, int _shape_t_xs_0, int _stride_t_xs_0) {
+extern "C" __global__ void maximum_path_jit(int* paths, int _shape_paths_0, int _stride_paths_0, int _shape_paths_1, int _stride_paths_1, int _shape_paths_2, int _stride_paths_2, float* values, int _shape_values_0, int _stride_values_0, int _shape_values_1, int _stride_values_1, int _shape_values_2, int _stride_values_2, int* t_ys, int _shape_t_ys_0, int _stride_t_ys_0, int* t_xs, int _shape_t_xs_0, int _stride_t_xs_0) {
     int b;
     float max_neg_val;
     int i;
