@@ -1,21 +1,20 @@
-MIT License
+PROPRIETARY SOURCE AVAILABLE LICENSE
 
-Copyright (c) 2025 Ivan Shivalov
+Copyright (c) 2025 Ivan Shivalov. All Rights Reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+NOTICE: This file and the associated software ("Software") is the intellectual property of the Author. 
+The Source Code is made available for academic review and research evaluation purposes only.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. PERMISSIONS
+   - You may view, compile, and run the Software for non-commercial, academic research purposes.
+   - You may modify the Software for personal experimentation.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. RESTRICTIONS
+   - COMMERCIAL USE IS STRICTLY PROHIBITED. You may not use this Software or any derivatives in a commercial environment or product without a separate written license agreement.
+   - You may not redistribute, sub-license, or sell copies of the Software.
+   - You may not use the Software to train machine learning models or AI systems without explicit permission.
+
+3. DISCLAIMER
+   - THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+For commercial licensing inquiries or collaboration requests, please contact the Author.

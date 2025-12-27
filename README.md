@@ -1,5 +1,10 @@
 # PyCUDA Compiler
 
+> [!CAUTION]
+> **PROPRIETARY / CONFIDENTIAL**. This software is a Research Preview.
+> **Commercial use, redistribution, or derivation is STRICTLY PROHIBITED** without a written license.
+> All Rights Reserved. (c) 2025 Ivan Shivalov.
+
 Компилятор Python → CUDA, позволяющий писать GPU-код на чистом Python.
 
 ## Особенности
@@ -184,4 +189,7 @@ Python → Parser → IR → Type Inference → CodeGen → CUDA C++ → nvrtc �
 
 ## Лицензия
 
-MIT
+## Лицензия
+
+**PROPRIETARY SOURCE AVAILABLE**. See [LICENSE](LICENSE) for details.
+Commercial use prohibited.
