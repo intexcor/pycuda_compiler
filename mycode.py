@@ -1,15 +1,18 @@
+import cupy as cp
 from compiler import cuda_compile, Array, float32
 from math import sqrt
 
 @cuda_compile
-def process(data: Array[float32]):
+def square_root_kernel(data: Array[float32], result: Array[float32]):
+    # Automatic parallelization handles the loop distributions!
     for i in range(len(data)):
-        if data[i] > 0:
-            data[i] = sqrt(data[i])
-        else:
-            data[i] = data[i] * data[i]
+        result[i] = sqrt(data[i])
 
-data = process.array([4.0, -2.0, 9.0, -3.0])
-process(data)
-print(process.to_numpy(data))
-print(process.cuda_code)
+# Create data on GPU
+data = cp.array([1.0, 4.0, 9.0, 16.0], dtype=cp.float32)
+result = cp.zeros_like(data)
+
+# Run kernel
+square_root_kernel(data, result)
+
+print(result) # [1. 2. 3. 4.]

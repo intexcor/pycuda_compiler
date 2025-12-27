@@ -30,7 +30,8 @@ Here is a simple example that computes the square root of an array of numbers.
 
 ```python
 import cupy as cp
-from pycuda_compiler import cuda_compile, Array, float32, sqrt
+from compiler import cuda_compile, Array, float32
+from math import sqrt
 
 @cuda_compile
 def square_root_kernel(data: Array[float32], result: Array[float32]):
