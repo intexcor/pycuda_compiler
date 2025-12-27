@@ -16,10 +16,10 @@ except ImportError:
     print("CuPy не установлен!")
     sys.exit(1)
 
-from compiler import CUDAProgram, cuda_compile, kernel, Array, float32, int32, Tensor
+from compiler import CUDAProgram, cuda_compile, kernel, Array, float32, int32
 import inspect
 import textwrap
-from math import exp, tanh, log, sqrt
+from math import exp, tanh, log
 
 # ============================================================================
 # Helper

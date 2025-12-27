@@ -17,7 +17,7 @@ def main():
     print(f"NumPy array dtype: {particles.dtype}")
     
     try:
-        gpu_particles = cp.asarray(particles)
+        _ = cp.asarray(particles)
         print("Success: cp.asarray(particles)")
     except Exception as e:
         print(f"Failed: cp.asarray(particles)\nError: {e}")
@@ -27,7 +27,7 @@ def main():
     try:
         # Just copy bytes
         particles_bytes = particles.view(np.uint8)
-        gpu_bytes = cp.asarray(particles_bytes)
+        _ = cp.asarray(particles_bytes)
         print("Success: cp.asarray(particles.view(np.uint8))")
         
         # Can we cast it back?

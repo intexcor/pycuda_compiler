@@ -6,10 +6,7 @@ PyCUDA Compiler - Runtime
 
 from __future__ import annotations
 import hashlib
-import os
-import tempfile
-from typing import Dict, List, Optional, Tuple, Any, Union
-from functools import lru_cache
+from typing import Dict, Optional, Tuple, Any, Union
 
 try:
     import cupy as cp
@@ -195,11 +192,11 @@ class CUDAStruct:
         # Создаём структурированный dtype для NumPy/CuPy
         dtype_list = []
         for name, t in struct_def.items():
-            if t == float or t == 'float32':
+            if t is float or t == 'float32':
                 dtype_list.append((name, cp.float32))
-            elif t == int or t == 'int32':
+            elif t is int or t == 'int32':
                 dtype_list.append((name, cp.int32))
-            elif t == bool or t == 'bool':
+            elif t is bool or t == 'bool':
                 dtype_list.append((name, cp.bool_))
             else:
                 dtype_list.append((name, cp.float32))

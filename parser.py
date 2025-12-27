@@ -6,16 +6,13 @@ PyCUDA Compiler - Python AST Parser
 
 from __future__ import annotations
 import ast
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Dict, List, Optional, Tuple
 from types_ir import (
-    CUDAType, TypeKind, FunctionType,
-    BUILTIN_TYPES, VOID, BOOL, INT32, INT64, FLOAT32, FLOAT64, STRING,
+    CUDAType, TypeKind, BUILTIN_TYPES, VOID, BOOL, INT32, FLOAT32, STRING,
     IRNode, IRModule, IRStructDef, IRFunctionDef, IRVarDecl,
     IRAssign, IRAugAssign, IRIf, IRFor, IRParallelFor, IRWhile,
-    IRReturn, IRBreak, IRContinue, IRExprStmt, IRBlock,
-    IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
-    IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
-    IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice,
+    IRReturn, IRBreak, IRContinue, IRExprStmt, IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
+    IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice,
     BinaryOp, UnaryOp, CompareOp
 )
 

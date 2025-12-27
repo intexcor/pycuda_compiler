@@ -110,14 +110,14 @@ def print_benchmark_result(name, cpu_result, gpu_result, size):
     print(f"Data size: {size:,} elements")
     print(f"{'=' * 60}")
     
-    print(f"\n  CPU (NumPy):")
+    print("\n  CPU (NumPy):")
     print(f"    Mean: {cpu_result['mean']:.3f} ms")
     print(f"    Std:  {cpu_result['std']:.3f} ms")
     print(f"    Min:  {cpu_result['min']:.3f} ms")
     print(f"    Max:  {cpu_result['max']:.3f} ms")
     
     if gpu_result:
-        print(f"\n  GPU (CUDA):")
+        print("\n  GPU (CUDA):")
         print(f"    Mean: {gpu_result['mean']:.3f} ms")
         print(f"    Std:  {gpu_result['std']:.3f} ms")
         print(f"    Min:  {gpu_result['min']:.3f} ms")
@@ -131,7 +131,7 @@ def print_benchmark_result(name, cpu_result, gpu_result, size):
         else:
             print(f"     CPU быстрее на {(1 - speedup) * 100:.1f}%")
     else:
-        print(f"\n  GPU: недоступен")
+        print("\n  GPU: недоступен")
 
 
 # ============================================================================

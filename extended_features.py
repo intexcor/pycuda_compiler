@@ -6,15 +6,11 @@ PyCUDA Compiler - Extended Features
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple, Any
-import ast
+from typing import List, Tuple
 
 from types_ir import (
-    CUDAType, TypeKind, IRNode, IRNodeKind,
-    FLOAT32, INT32, BOOL, VOID,
-    IRFunctionDef, IRCall, IRVar, IRConst, IRStructDef,
-    IRAssign, IRReturn, IRIf, IRFor, IRWhile,
-    BinaryOp, CompareOp
+    CUDAType, IRNode, IRNodeKind,
+    FLOAT32, INT32, VOID
 )
 
 

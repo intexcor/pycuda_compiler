@@ -6,7 +6,7 @@ PyCUDA Compiler - Type System and Intermediate Representation
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum, auto
 
 

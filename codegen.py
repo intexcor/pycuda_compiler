@@ -5,15 +5,13 @@ PyCUDA Compiler - CUDA Code Generator
 """
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 from types_ir import (
     CUDAType, TypeKind,
-    BUILTIN_TYPES, VOID, BOOL, INT32, INT64, FLOAT32, FLOAT64,
     IRNode, IRModule, IRStructDef, IRFunctionDef, IRVarDecl,
     IRAssign, IRAugAssign, IRIf, IRFor, IRParallelFor, IRWhile,
     IRReturn, IRBreak, IRContinue, IRExprStmt, IRBlock,
     IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
-    IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
     IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
     IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice,
     BinaryOp, UnaryOp, CompareOp
@@ -227,8 +225,10 @@ class CUDACodeGen:
         
         def scan_string(t: Optional[CUDAType]):
              nonlocal has_string
-             if has_string or t is None: return
-             if t in string_checked: return
+             if has_string or t is None:
+                 return
+             if t in string_checked:
+                 return
              string_checked.add(t)
              
              if t.kind == TypeKind.STRING:
@@ -241,7 +241,8 @@ class CUDACodeGen:
                  scan_string(et)
                  
         for func in module.functions:
-            if has_string: break
+            if has_string:
+                break
             scan_string(func.return_type)
             for _, t in func.params:
                 scan_string(t)
@@ -989,7 +990,7 @@ class CUDACodeGen:
         # Simple hash function generation (inline)
         # Should vary by key type logic? 
         # For now, cast to int logic
-        get_hash = f"((unsigned)k * 2654435761u)"
+        get_hash = "((unsigned)k * 2654435761u)"
         
         return f'''struct {name} {{
     {key_type} keys[{capacity}];
@@ -1044,7 +1045,7 @@ class CUDACodeGen:
         name = t.cuda_name
         capacity = t.capacity
         
-        get_hash = f"((unsigned)k * 2654435761u)"
+        get_hash = "((unsigned)k * 2654435761u)"
         
         return f'''struct {name} {{
     {key_type} keys[{capacity}];

@@ -9,10 +9,7 @@ PyCUDA Compiler - Tests
 import sys
 sys.path.insert(0, '/home/claude/pycuda_compiler')
 
-from compiler import CUDAProgram, cuda_compile, Array, float32
-from parser import PythonParser
-from type_inference import TypeInference
-from codegen import CUDACodeGen
+from compiler import CUDAProgram
 
 def test_simple_kernel():
     """Тест простого kernel."""

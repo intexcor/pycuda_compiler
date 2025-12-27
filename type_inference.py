@@ -5,18 +5,15 @@ PyCUDA Compiler - Type Inference
 """
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Optional
 from types_ir import (
     CUDAType, TypeKind,
-    BUILTIN_TYPES, VOID, BOOL, INT32, INT64, FLOAT32, FLOAT64,
-    IRNode, IRModule, IRStructDef, IRFunctionDef, IRVarDecl,
+    VOID, BOOL, INT32, FLOAT32, IRNode, IRModule, IRStructDef, IRFunctionDef, IRVarDecl,
     IRAssign, IRAugAssign, IRIf, IRFor, IRParallelFor, IRWhile,
-    IRReturn, IRBreak, IRContinue, IRExprStmt, IRBlock,
+    IRReturn, IRExprStmt, IRBlock,
     IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
     IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
-    IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
-    IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice, IRNodeKind,
-    BinaryOp, UnaryOp, CompareOp
+    IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice, BinaryOp, UnaryOp
 )
 
 

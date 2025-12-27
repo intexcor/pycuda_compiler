@@ -9,7 +9,7 @@ sys.path.append(os.getcwd())
 
 try:
     import cupy as cp
-    from compiler import cuda_compile, Tensor, float32, int32, kernel
+    from compiler import cuda_compile, Tensor, float32, int32
 except ImportError as e:
     print(f"Cupy or Compiler not found: {e}")
     sys.exit(1)

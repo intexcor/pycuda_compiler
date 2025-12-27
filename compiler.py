@@ -24,14 +24,12 @@ PyCUDA Compiler - Main API
 from __future__ import annotations
 import inspect
 import textwrap
-from typing import Dict, List, Optional, Callable, Any, Union, Tuple
-from functools import wraps
+from typing import Dict, List as PyList, Optional, Callable, Any, Tuple
 
 from types_ir import (
-    CUDAType, TypeKind, FLOAT32, INT32, BOOL,
     IRModule, IRFunctionDef
 )
-from parser import PythonParser, ParseError
+from parser import PythonParser
 from type_inference import TypeInference
 from codegen import CUDACodeGen
 
@@ -99,6 +97,7 @@ class CUDAProgram:
         self._cuda_code: Optional[str] = None
         self._kernels: Dict[str, Any] = {}
         self._kernel_info: Dict[str, IRFunctionDef] = {}
+        self.functions: PyList[IRFunctionDef] = []
         
         self._compile()
     
@@ -224,7 +223,7 @@ extern "C" {{
                                 else:
                                     # Покажем начало PTX для отладки
                                     ptx_lines = ptx_str.split('\n')[:50]
-                                    ptx_info = f"\nFirst 50 lines of PTX:\n" + '\n'.join(ptx_lines)
+                                    ptx_info = "\nFirst 50 lines of PTX:\n" + '\n'.join(ptx_lines)
                     except Exception as ptx_err:
                         ptx_info = f"\nCould not extract PTX: {ptx_err}"
                     
@@ -325,7 +324,7 @@ extern "C" {{
                     raise ValueError(f"Argument '{param_name}' (List) must be a tuple (buffer_array, size_array)")
                 
                 if not isinstance(buf, cp.ndarray) or not isinstance(sz, cp.ndarray):
-                    raise TypeError(f"List argument components must be cupy arrays")
+                    raise TypeError("List argument components must be cupy arrays")
                 
                 # Check types?
                 # We need to construct the C++ struct on the fly? No, the kernel signature expects struct by value?

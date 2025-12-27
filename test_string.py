@@ -1,6 +1,5 @@
 
 import cupy as cp
-import numpy as np
 from compiler import CUDAProgram
 
 SOURCE = """

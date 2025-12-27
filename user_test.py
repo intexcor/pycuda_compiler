@@ -10,6 +10,7 @@ try:
 except ImportError:
     # Fallback to local import
     from compiler import cuda_compile, Array, float32
+    from math import sqrt
 
 @cuda_compile
 def process(data: Array[float32]):

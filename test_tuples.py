@@ -2,13 +2,10 @@
 import sys
 import os
 import cupy as cp
-import numpy as np
-from typing import Tuple
 
 # Update path to find local compiler module
 sys.path.append(os.getcwd())
 
-from compiler import cuda_compile, Array, int32, float32
 
 # Device function returning a tuple
 from compiler import CUDAProgram

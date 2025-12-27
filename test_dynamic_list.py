@@ -101,7 +101,7 @@ def test_list_read():
     )
     
     res = int(out[0])
-    print(f"Expected val at idx 1: 20")
+    print("Expected val at idx 1: 20")
     print(f"Kernel val:            {res}")
     
     if res != 20:
