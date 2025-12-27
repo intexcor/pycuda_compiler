@@ -165,7 +165,7 @@ class PythonParser:
         # Проверяем декораторы
         is_kernel = False
         for dec in node.decorator_list:
-            if isinstance(dec, ast.Name) and dec.id == 'kernel':
+            if isinstance(dec, ast.Name) and dec.id in ('kernel', 'cuda_compile'):
                 is_kernel = True
         
         func = IRFunctionDef(

@@ -416,8 +416,10 @@ class CUDACodeGen:
         
         # Сигнатура
         prefix = ''
+        # Сигнатура
+        prefix = ''
         if func.is_kernel:
-            prefix = '__global__'
+            prefix = 'extern "C" __global__'
         elif func.is_device or func.is_method:
             prefix = '__device__'
         

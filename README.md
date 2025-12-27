@@ -24,6 +24,14 @@ pip install cupy-cuda12x numpy
 cp -r pycuda_compiler /your/project/
 ```
 
+## CLI Использование
+
+Вы можете скомпилировать Python файл в CUDA C++ прямо из консоли:
+
+```bash
+python cli.py input.py -o kernel.cu
+```
+
 ## Быстрый старт
 
 ```python

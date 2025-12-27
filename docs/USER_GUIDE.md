@@ -21,7 +21,51 @@ Requirements:
 pip install cupy-cuda12x  # Adjust for your CUDA version
 # Clone this repository
 git clone https://github.com/yourusername/pycuda_compiler.git
-cd pycuda_compiler
+cd python cli.py input.py -o kernel.cu
+```
+
+### Компиляция с NVCC
+
+Сгенерированный `.cu` файл содержит только ядра (kernels). Чтобы использовать их:
+
+**1. Компиляция в PTX (для загрузки в Python):**
+```bash
+nvcc -ptx kernel.cu -o kernel.ptx
+```
+Затем можно загрузить через `cupy.RawModule(filename='kernel.ptx')`.
+
+**2. Компиляция в Shared Library (для C++):**
+```bash
+nvcc -shared -Xcompiler -fPIC kernel.cu -o kernel.so
+```
+
+### Как использовать kernel.ptx (Python)
+
+Скомпилированный PTX файл можно загрузить и исполнить в любом Python скрипте с помощью `cupy.RawModule`, даже без установленного PyCUDA Compiler.
+
+```python
+import cupy as cp
+
+# Загрузка модуля
+module = cp.RawModule(path='kernel.ptx')
+kernel = module.get_function('square_root_kernel')
+
+# Подготовка данных
+data = cp.array([1.0, 4.0, 9.0, 16.0], dtype=cp.float32)
+result = cp.zeros_like(data)
+
+# Аргументы для C++ ядра (pointers и размеры)
+# void square_root_kernel(float* data, int size_data, float* result, int size_result)
+args = (
+    data, 
+    cp.int32(data.size), 
+    result, 
+    cp.int32(result.size)
+)
+
+# Запуск
+kernel((1,), (256,), args)
+print(result)
 ```
 
 ## Quick Start
