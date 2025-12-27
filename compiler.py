@@ -59,6 +59,11 @@ class Array:
     def __class_getitem__(cls, item):
         return f'Array[{item}]'
 
+class List:
+    """Type hint для GPU списков."""
+    def __class_getitem__(cls, item):
+        return f'List[{item}]'
+
 class Tensor:
     """Type hint для GPU тензоров."""
     def __class_getitem__(cls, item):
@@ -78,21 +83,6 @@ int64 = 'int64'
 class CUDAProgram:
     """
     Компилирует Python код в CUDA и предоставляет API для запуска.
-    
-    Пример:
-        source = '''
-        @kernel
-        def process(data: Array[float32]):
-            for i in range(len(data)):
-                data[i] = sqrt(data[i])
-        '''
-        
-        program = CUDAProgram(source)
-        program.show_cuda()  # показать сгенерированный код
-        
-        data = program.array([1.0, 4.0, 9.0])
-        program.run('process', data)
-        print(data)  # [1.0, 2.0, 3.0]
     """
     
     def __init__(self, source: str, debug: bool = False):
@@ -303,8 +293,6 @@ extern "C" {{
                  # Push shapes and strides
                  rank = param_type.rank
                  if arg.ndim != rank:
-                      # Allow if rank is -1 (dynamic)? No, we fixed rank in type.
-                      # Maybe just warn or error.
                       pass
                  
                  for d in range(rank):
@@ -319,6 +307,50 @@ extern "C" {{
                  if size is None and rank > 0:
                      size = arg.shape[0]
 
+            # List support
+            elif param_type and param_type.is_list():
+                # arg should be a tuple (buffer, size_ptr) or just buffer (ifsize=0)?
+                # Actually, the user should pass a pre-allocated buffer for the list content.
+                # And we need to manage the size.
+                # Ideally, we pass a special List object from python side.
+                # But for now, let's accept a tuple: (buffer_array, size_array)
+                # buffer_array: where elements are stored. capacity = len(buffer_array)
+                # size_array: 1-element int32 array storing current size (indices count).
+                
+                if isinstance(arg, tuple) and len(arg) == 2:
+                    buf, sz = arg
+                else:
+                    # Provide defaults? Or expect user to pass (buffer, size_arr)
+                    # Let's verify types
+                    raise ValueError(f"Argument '{param_name}' (List) must be a tuple (buffer_array, size_array)")
+                
+                if not isinstance(buf, cp.ndarray) or not isinstance(sz, cp.ndarray):
+                    raise TypeError(f"List argument components must be cupy arrays")
+                
+                # Check types?
+                # We need to construct the C++ struct on the fly? No, the kernel signature expects struct by value?
+                # Actually, in CUDA C++, structs are passed by value.
+                # We need to pass the fields of the struct as separate kernel arguments?
+                # Or pass a single pointer to a struct in global memory?
+                # Easier: CodeGen generates struct. Arg is struct by value.
+                # But struct by value in kernel args?
+                # "Kernel arguments are passed by value". 
+                # If the struct contains pointers, we pass the struct (which is small) by value.
+                # So we need to pass: buf_ptr, size_ptr, capacity (int).
+                
+                # Let's check how CodeGen generates the function signature for List.
+                # Currently it calls `type_to_cuda`, which for struct returns name.
+                # But we haven't updated CodeGen yet! CodeGen needs to expand List args.
+                # Wait, if `type_to_cuda` returns a struct name, then the kernel expects that struct.
+                # In PyCUDA/CuPy call, we can't pass a raw C struct easily unless we pack it into bytes.
+                # Alternatively, we can assume CodeGen expands it to (T* data, int* size, int capacity).
+                # Expanding is easier for Python interoperability.
+                # Let's assume CodeGen WILL expand List arguments.
+                
+                cuda_args.append(buf) # data ptr
+                cuda_args.append(sz)  # size ptr
+                cuda_args.append(cp.int32(buf.size)) # capacity
+                
             # Support for manual size override: (array, logical_size)
             elif isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[0], cp.ndarray):
                 arr, logical_size = arg

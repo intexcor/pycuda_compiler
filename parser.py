@@ -9,13 +9,13 @@ import ast
 from typing import Dict, List, Optional, Tuple, Any, Set
 from types_ir import (
     CUDAType, TypeKind, FunctionType,
-    BUILTIN_TYPES, VOID, BOOL, INT32, INT64, FLOAT32, FLOAT64,
+    BUILTIN_TYPES, VOID, BOOL, INT32, INT64, FLOAT32, FLOAT64, STRING,
     IRNode, IRModule, IRStructDef, IRFunctionDef, IRVarDecl,
     IRAssign, IRAugAssign, IRIf, IRFor, IRParallelFor, IRWhile,
     IRReturn, IRBreak, IRContinue, IRExprStmt, IRBlock,
     IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
     IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
-    IRArrayInit, IRStructInit, IRTensorSlice,
+    IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice,
     BinaryOp, UnaryOp, CompareOp
 )
 
@@ -63,6 +63,8 @@ class PythonParser:
         ast.LtE: CompareOp.LE,
         ast.Gt: CompareOp.GT,
         ast.GtE: CompareOp.GE,
+        ast.In: CompareOp.IN,
+        ast.NotIn: CompareOp.NOT_IN,
     }
     
     def __init__(self):
@@ -490,12 +492,18 @@ class PythonParser:
     def visit_constant(self, node: ast.Constant) -> IRNode:
         """Обрабатывает константу."""
         value = node.value
+        if value is None:
+             # None maps to empty Optional
+             return IROptionalInit(value=None, lineno=node.lineno)
+        
         if isinstance(value, bool):
             return IRConst(value=value, type=BOOL, lineno=node.lineno)
         elif isinstance(value, int):
             return IRConst(value=value, type=INT32, lineno=node.lineno)
         elif isinstance(value, float):
             return IRConst(value=value, type=FLOAT32, lineno=node.lineno)
+        elif isinstance(value, str):
+            return IRConst(value=value, type=STRING, lineno=node.lineno)
         else:
             raise ParseError(f"Unsupported constant type: {type(value)}", node)
     
@@ -631,6 +639,14 @@ class PythonParser:
                 return IRStructInit(
                     struct_name=func_name,
                     lineno=node.lineno
+                )
+            
+            # Handle Some(x) -> Optional init
+            if func_name == 'Some' and len(args) == 1:
+                return IROptionalInit(
+                    value=args[0],
+                    lineno=node.lineno,
+                    col_offset=node.col_offset
                 )
             
             # Пользовательская функция
@@ -789,11 +805,9 @@ class PythonParser:
         )
     
     def visit_tuple(self, node: ast.Tuple) -> IRNode:
-        """Обрабатывает кортеж (как массив)."""
-        list_node = ast.List(elts=node.elts, ctx=node.ctx)
-        list_node.lineno = getattr(node, 'lineno', 0)
-        list_node.col_offset = getattr(node, 'col_offset', 0)
-        return self.visit_list(list_node)
+        """Обрабатывает кортеж."""
+        elements = [self.visit_expr(e) for e in node.elts]
+        return IRTupleInit(elements=elements, lineno=node.lineno)
     
     def parse_type_annotation(self, node: ast.expr) -> CUDAType:
         """Парсит аннотацию типа."""
@@ -846,8 +860,32 @@ class PythonParser:
                              rank = val
                     return elem_type.tensor_of(rank)
                 
-                if container in ('Array', 'List', 'Tensor'):
-                    # Array[type] or Tensor[type] (default rank 1)
+                if container == 'List':
+                    elem_type = self.parse_type_annotation(args[0])
+                    return elem_type.list_of()
+
+                if container == 'Tuple':
+                    # Parse all args for Tuple
+                    tuple_types = [self.parse_type_annotation(arg) for arg in args]
+                    return CUDAType.tuple_of(tuple_types)
+
+                if container == 'Optional':
+                    elem_type = self.parse_type_annotation(args[0])
+                    return elem_type.optional_of()
+                
+                if container == 'Dict' and len(args) == 2:
+                    # Dict[Key, Value]
+                    key_type = self.parse_type_annotation(args[0])
+                    val_type = self.parse_type_annotation(args[1])
+                    return key_type.dict_of(val_type)
+
+                if container == 'Set':
+                    # Set[Element]
+                    elem_type = self.parse_type_annotation(args[0])
+                    return elem_type.set_of()
+
+                if container == 'Array':
+                    # Array[type] (default rank 1)
                     elem_type = self.parse_type_annotation(args[0])
                     return elem_type.array_of()
         

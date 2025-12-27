@@ -26,6 +26,11 @@ class TypeKind(Enum):
     FUNCTION = auto()
     TUPLE = auto()
     GENERIC = auto()  # для вывода типов
+    LIST = auto()     # Dynamic List
+    OPTIONAL = auto() # Optional[T]
+    STRING = auto()   # Fixed size string
+    DICT = auto()     # Fixed Hash Map
+    SET = auto()      # Fixed Hash Set
 
 
 @dataclass
@@ -50,6 +55,9 @@ class CUDAType:
     # Для кортежей
     element_types: List[CUDAType] = field(default_factory=list)
     
+    # Для списков (capacity fix)
+    capacity: int = 1024
+    
     def __hash__(self):
         return hash((self.kind, self.name))
     
@@ -64,11 +72,17 @@ class CUDAType:
     def is_array(self) -> bool:
         return self.kind == TypeKind.ARRAY
     
+    def is_list(self) -> bool:
+        return self.kind == TypeKind.LIST
+    
     def is_pointer(self) -> bool:
         return self.kind == TypeKind.POINTER
     
     def is_struct(self) -> bool:
         return self.kind == TypeKind.STRUCT
+
+    def is_dict(self) -> bool:
+        return self.kind == TypeKind.DICT
     
     def pointer_to(self) -> CUDAType:
         """Создаёт указатель на этот тип."""
@@ -88,6 +102,64 @@ class CUDAType:
             cuda_name=f'{self.cuda_name}*',
             size=size * self.size if size > 0 else 0,
             element_type=self
+        )
+
+    def list_of(self, capacity: int = 1024) -> CUDAType:
+        """Создаёт список этого типа."""
+        return CUDAType(
+            kind=TypeKind.LIST,
+            name=f'List[{self.name}]',
+            cuda_name=f'List_{self.name}', # Will be generated struct name
+            element_type=self,
+            capacity=capacity
+        )
+
+    def optional_of(self) -> CUDAType:
+        """Создаёт Optional[T] тип."""
+        return CUDAType(
+            kind=TypeKind.OPTIONAL,
+            name=f'Optional[{self.name}]',
+            cuda_name=f'Optional_{self.name}',
+            element_type=self
+        )
+
+    @staticmethod
+    def tuple_of(types: List[CUDAType]) -> CUDAType:
+        """Создаёт кортеж типов."""
+        ptypes = [t for t in types]
+        name = f"Tuple[{', '.join(t.name for t in ptypes)}]"
+        # Generate safe C++ name (Tuple_float_int)
+        cuda_name = f"Tuple_{'_'.join(t.cuda_name.replace('*', 'Ptr').replace(' ', '') for t in ptypes)}"
+        return CUDAType(
+            kind=TypeKind.TUPLE,
+            name=name,
+            cuda_name=cuda_name,
+            element_types=ptypes
+        )
+
+    def dict_of(self, value_type: CUDAType, capacity: int = 256) -> CUDAType:
+        """Создаёт словарь Dict[Key, Value]."""
+        # self is Key type
+        name = f"Dict[{self.name}, {value_type.name}]"
+        cuda_name = f"Dict_{self.cuda_name}_{value_type.cuda_name}"
+        return CUDAType(
+            kind=TypeKind.DICT,
+            name=name,
+            cuda_name=cuda_name,
+            element_types=[self, value_type],
+            capacity=capacity
+        )
+
+    def set_of(self, capacity: int = 256) -> CUDAType:
+        """Создаёт множество Set[self]."""
+        name = f"Set[{self.name}]"
+        cuda_name = f"Set_{self.cuda_name}"
+        return CUDAType(
+            kind=TypeKind.SET,
+            name=name,
+            cuda_name=cuda_name,
+            element_type=self,
+            capacity=capacity
         )
 
     def is_tensor(self) -> bool:
@@ -139,6 +211,7 @@ UINT64 = CUDAType(TypeKind.INT, 'uint64', 'unsigned long long', 8)
 FLOAT16 = CUDAType(TypeKind.FLOAT, 'float16', '__half', 2)
 FLOAT32 = CUDAType(TypeKind.FLOAT, 'float32', 'float', 4)
 FLOAT64 = CUDAType(TypeKind.FLOAT, 'float64', 'double', 8)
+STRING = CUDAType(TypeKind.STRING, 'str', 'String', 64) # Fixed 64 chars
 
 # Алиасы
 INT = INT32
@@ -153,6 +226,7 @@ BUILTIN_TYPES: Dict[str, CUDAType] = {
     'uint8': UINT8, 'uint16': UINT16, 'uint32': UINT32, 'uint64': UINT64,
     'float16': FLOAT16, 'float32': FLOAT32, 'float64': FLOAT64,
     'int': INT32, 'float': FLOAT32, 'double': FLOAT64,
+    'str': STRING,
     # Python aliases
     'True': BOOL, 'False': BOOL,
 }
@@ -200,6 +274,8 @@ class IRNodeKind(Enum):
     ARRAY_INIT = auto()
     STRUCT_INIT = auto()
     TENSOR_SLICE = auto()
+    TUPLE_INIT = auto()
+    OPTIONAL_INIT = auto()
 
 
 class BinaryOp(Enum):
@@ -236,6 +312,8 @@ class CompareOp(Enum):
     LE = '<='
     GT = '>'
     GE = '>='
+    IN = 'in'
+    NOT_IN = 'not in'
 
 
 @dataclass
@@ -474,6 +552,21 @@ class IRArrayInit(IRNode):
     """Инициализация массива."""
     kind: IRNodeKind = IRNodeKind.ARRAY_INIT
     elements: List[IRNode] = field(default_factory=list)
+
+
+@dataclass
+class IRTupleInit(IRNode):
+    """Инициализация кортежа."""
+    kind: IRNodeKind = IRNodeKind.TUPLE_INIT
+    elements: List[IRNode] = field(default_factory=list)
+
+
+@dataclass
+class IROptionalInit(IRNode):
+    """Инициализация Optional."""
+    kind: IRNodeKind = IRNodeKind.OPTIONAL_INIT
+    value: Optional[IRNode] = None # None for empty/null, or expr
+    val_type: Optional[CUDAType] = None # Explicit type if known (e.g. for None)
 
 
 @dataclass

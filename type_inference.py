@@ -15,7 +15,7 @@ from types_ir import (
     IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
     IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
     IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
-    IRArrayInit, IRStructInit, IRTensorSlice, IRNodeKind,
+    IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice, IRNodeKind,
     BinaryOp, UnaryOp, CompareOp
 )
 
@@ -174,7 +174,19 @@ class TypeInference:
             
             if var_name in self.var_types:
                 # Уже известен тип
-                stmt.target.type = self.var_types[var_name]
+                current_type = self.var_types[var_name]
+                if current_type == FLOAT32 and value_type and value_type != FLOAT32:
+                    # Уточняем тип (был float по умолчанию)
+                    self.var_types[var_name] = value_type
+                    stmt.target.type = value_type
+                    self.changed = True
+                elif current_type.kind == TypeKind.OPTIONAL and value_type and value_type.kind == TypeKind.OPTIONAL and value_type.element_type == VOID:
+                     # Assigning None (Optional[Void]) to Optional[T] is valid
+                     # Propagate type to the value node so codegen knows what to generate
+                     stmt.value.type = current_type
+                     pass
+                else:
+                    stmt.target.type = current_type
             else:
                 # Новая переменная - присваиваем тип от значения
                 self.var_types[var_name] = value_type or FLOAT32
@@ -233,8 +245,17 @@ class TypeInference:
             # Проверяем совместимость с объявленным типом возврата
             if self.current_function and self.current_function.return_type == VOID:
                 if ret_type and ret_type != VOID:
+                    # Allow inferred return type update
                     self.current_function.return_type = ret_type
                     self.changed = True
+            elif self.current_function and self.current_function.return_type.kind == TypeKind.OPTIONAL:
+                 # Check if returning None (Optional[Void])
+                 if ret_type and ret_type.kind == TypeKind.OPTIONAL and ret_type.element_type == VOID:
+                      # Propagate return type to the return value node
+                      stmt.value.type = self.current_function.return_type
+                      pass # returning None is fine
+                 elif ret_type != self.current_function.return_type:
+                      pass # Mismatch? Or maybe generic Optional logic?
     
     def infer_expr(self, expr: IRNode) -> Optional[CUDAType]:
         """Выводит тип выражения."""
@@ -278,8 +299,14 @@ class TypeInference:
             expr.type = expr.target_type
             return expr.target_type
         
-        elif isinstance(expr, IRArrayInit):
+        if isinstance(expr, IRArrayInit):
             return self.infer_array_init(expr)
+        
+        elif isinstance(expr, IRTupleInit):
+            return self.infer_tuple_init(expr)
+            
+        elif isinstance(expr, IROptionalInit):
+            return self.infer_optional_init(expr)
         
         elif isinstance(expr, IRStructInit):
             return self.infer_struct_init(expr)
@@ -443,8 +470,16 @@ class TypeInference:
         obj_type = self.infer_expr(expr.obj)
         self.infer_expr(expr.index)
         
-        if obj_type and obj_type.element_type:
-            expr.type = obj_type.element_type
+        if obj_type:
+            if obj_type.element_type:
+                expr.type = obj_type.element_type
+            elif obj_type.kind == TypeKind.TUPLE:
+                # Tuple indexing: tuple[const]
+                if isinstance(expr.index, IRConst) and isinstance(expr.index.value, int):
+                    idx = expr.index.value
+                    if 0 <= idx < len(obj_type.element_types):
+                        expr.type = obj_type.element_types[idx]
+            # Handle variable index for homogeneous tuple? Not supporting that yet as field access is static.
         
         return expr.type
     
@@ -502,6 +537,28 @@ class TypeInference:
             elem_type = self.infer_expr(expr.elements[0]) or FLOAT32
         
         expr.type = elem_type.array_of(len(expr.elements))
+        return expr.type
+
+    def infer_tuple_init(self, expr: IRTupleInit) -> Optional[CUDAType]:
+        """Выводит тип инициализации кортежа."""
+        types = []
+        for e in expr.elements:
+            t = self.infer_expr(e) or FLOAT32
+            types.append(t)
+        
+        expr.type = CUDAType.tuple_of(types)
+        return expr.type
+
+    def infer_optional_init(self, expr: IROptionalInit) -> Optional[CUDAType]:
+        """Выводит тип инициализации Optional."""
+        if expr.value is None:
+            # None -> Optional[Void] (generic None)
+            expr.type = VOID.optional_of()
+            return expr.type
+            
+        val_type = self.infer_expr(expr.value)
+        if val_type:
+            expr.type = val_type.optional_of()
         return expr.type
     
     def infer_struct_init(self, expr: IRStructInit) -> Optional[CUDAType]:
