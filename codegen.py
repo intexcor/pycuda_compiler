@@ -150,12 +150,55 @@ class CUDACodeGen:
         # Helper макросы
         lines.append('// Thread indexing helpers')
         lines.append('#define THREAD_ID (blockIdx.x * blockDim.x + threadIdx.x)')
-        lines.append('#define THREAD_ID (blockIdx.x * blockDim.x + threadIdx.x)')
         lines.append('#define GRID_STRIDE (blockDim.x * gridDim.x)')
         lines.append('')
         
+        # Scan for IRArrayAlloc usage to optionally include ScopedArray
+        has_array_alloc = False
+        def scan_array_alloc(stmt: IRNode):
+            nonlocal has_array_alloc
+            if has_array_alloc: return
+            
+            if isinstance(stmt, IRArrayAlloc):
+                has_array_alloc = True
+                return
+            
+            # Recursive checks
+            if isinstance(stmt, IRAssign):
+                scan_array_alloc(stmt.value)
+            elif isinstance(stmt, IRAugAssign):
+                scan_array_alloc(stmt.value)
+            elif isinstance(stmt, IRExprStmt):
+                 scan_array_alloc(stmt.expr)
+            elif isinstance(stmt, (IRIf, IRWhile)):
+                scan_array_alloc(stmt.condition)
+                for s in (stmt.then_body if isinstance(stmt, IRIf) else stmt.body):
+                     scan_array_alloc(s)
+                if isinstance(stmt, IRIf) and stmt.else_body:
+                     for s in stmt.else_body: scan_array_alloc(s)
+            elif isinstance(stmt, (IRFor, IRParallelFor)):
+                 scan_array_alloc(stmt.start)
+                 scan_array_alloc(stmt.end)
+                 if stmt.step: scan_array_alloc(stmt.step)
+                 for s in stmt.body: scan_array_alloc(s)
+            elif isinstance(stmt, IRBlock):
+                 for s in stmt.statements: scan_array_alloc(s)
+            elif isinstance(stmt, IRReturn) and stmt.value:
+                 scan_array_alloc(stmt.value)
+            elif isinstance(stmt, IRVarDecl) and stmt.init_value:
+                 scan_array_alloc(stmt.init_value)
+            # Expressions recursions (simplified)
+            # Ideally we traverse whole tree.
+            # But IRArrayAlloc usually appears in Assign or VarDecl or top level Expr.
+        
+        for func in module.functions:
+            if has_array_alloc: break
+            for stmt in func.body:
+                scan_array_alloc(stmt)
+
         # ScopedArray for automatic memory management (RAII)
-        lines.append("""
+        if has_array_alloc:
+            lines.append("""
 template<typename T>
 struct ScopedArray {
     T* ptr;
@@ -185,7 +228,7 @@ struct ScopedArray {
     __device__ operator T*() { return ptr; }
 };
 """)
-        lines.append('')
+            lines.append('')
 
         # Собираем информацию о структурах
         for struct in module.structs:
