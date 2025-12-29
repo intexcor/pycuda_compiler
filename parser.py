@@ -12,7 +12,7 @@ from types_ir import (
     IRNode, IRModule, IRStructDef, IRFunctionDef, IRVarDecl,
     IRAssign, IRAugAssign, IRIf, IRFor, IRParallelFor, IRWhile,
     IRReturn, IRBreak, IRContinue, IRExprStmt, IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
-    IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice,
+    IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice, IRArrayAlloc, IRDelete,
     BinaryOp, UnaryOp, CompareOp
 )
 
@@ -233,6 +233,8 @@ class PythonParser:
             return IRExprStmt(expr=self.visit_expr(node.value), lineno=node.lineno)
         elif isinstance(node, ast.Pass):
             return None
+        elif isinstance(node, ast.Delete):
+            return self.visit_delete(node)
         else:
             raise ParseError(f"Unsupported statement: {type(node).__name__}", node)
     
@@ -450,6 +452,15 @@ class PythonParser:
             value = self.visit_expr(node.value)
         
         return IRReturn(value=value, lineno=node.lineno)
+
+    def visit_delete(self, node: ast.Delete) -> IRNode:
+        """Обрабатывает delete."""
+        # Support only single target for now: del x
+        if len(node.targets) != 1:
+             raise ParseError("Generic delete only supports one target", node)
+        
+        target = self.visit_expr(node.targets[0])
+        return IRDelete(target=target, lineno=node.lineno)
     
     def visit_expr(self, node: ast.expr) -> IRNode:
         """Обрабатывает выражение."""
@@ -602,6 +613,23 @@ class PythonParser:
         
         return result
     
+    def _parse_dtype_arg(self, node: ast.expr) -> CUDAType:
+        """Парсит аргумент dtype."""
+        if isinstance(node, ast.Attribute):
+            # np.int32
+            if isinstance(node.value, ast.Name) and node.value.id in ('np', 'numpy'):
+                 name = node.attr
+                 if name in BUILTIN_TYPES:
+                     return BUILTIN_TYPES[name]
+        elif isinstance(node, ast.Name):
+            if node.id in BUILTIN_TYPES:
+                return BUILTIN_TYPES[node.id]
+        elif isinstance(node, ast.Str) or isinstance(node, ast.Constant):
+             s = node.s if isinstance(node, ast.Str) else node.value
+             if isinstance(s, str) and s in BUILTIN_TYPES:
+                 return BUILTIN_TYPES[s]
+        return FLOAT32
+
     def visit_call(self, node: ast.Call) -> IRNode:
         """Обрабатывает вызов функции."""
         args = [self.visit_expr(arg) for arg in node.args]
@@ -610,6 +638,67 @@ class PythonParser:
         if isinstance(node.func, ast.Attribute):
             obj = self.visit_expr(node.func.value)
             method_name = node.func.attr
+            
+            # Numpy Support
+            if isinstance(obj, IRVar) and obj.name in ('np', 'numpy'):
+                if method_name in ('zeros', 'empty', 'ones'):
+                    # args[0] is shape
+                    if not args:
+                        raise ParseError("Numpy array creation requires shape argument", node)
+                    
+                    shape = args[0]
+                    zero_init = (method_name == 'zeros')
+                    
+                    # Parse dtype
+                    dtype = FLOAT32
+                    for kw in node.keywords:
+                        if kw.arg == 'dtype':
+                             dtype = self._parse_dtype_arg(kw.value)
+                    
+                    # ones implies filling with 1s. Current IRArrayAlloc only has zero_init.
+                    # Handling ones requires fill? 
+                    # For now treating ones same as zeros but I should handle it.
+                    # Or map ones to full(1).
+                    if method_name == 'ones':
+                         # Not supported properly with just zero_init
+                         # But let's map to alloc + fill
+                         pass 
+
+                    return IRArrayAlloc(
+                        size=shape,
+                        element_type=dtype,
+                        zero_init=zero_init,
+                        lineno=node.lineno
+                    )
+                
+                if method_name == 'full':
+                     # full(shape, val)
+                     pass
+
+                if method_name == 'array':
+                    if not args:
+                         raise ParseError("np.array requires argument", node)
+                    
+                    values = None
+                    # Check if args[0] is IRArrayInit (from visit_list)
+                    if isinstance(args[0], IRArrayInit):
+                         values = args[0].elements
+                         dtype = args[0].type.element_type if args[0].type else FLOAT32
+                    
+                    for kw in node.keywords:
+                        if kw.arg == 'dtype':
+                             dtype = self._parse_dtype_arg(kw.value)
+                    
+                    if values is None:
+                         raise ParseError("np.array support limited to list literals", node)
+                        
+                    return IRArrayAlloc(
+                        size=IRConst(len(values), INT32),
+                        element_type=dtype,
+                        values=values,
+                        lineno=node.lineno
+                    )
+
             return IRMethodCall(
                 obj=obj,
                 method_name=method_name,

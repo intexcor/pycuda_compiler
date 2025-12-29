@@ -276,8 +276,26 @@ extern "C" {{
         # Проверяем соответствие аргументов
         params = kernel_info.params
         
+        # Post-processing tasks (write-back for numpy arrays)
+        write_back_tasks = []
+        
         # Args loop
         for i, arg in enumerate(args):
+            # Check for NumPy array -> convert to CuPy
+            is_numpy = HAS_NUMPY and np is not None and isinstance(arg, np.ndarray)
+            if is_numpy:
+                # Creates a copy on device
+                # Note: cp.asarray(arg) might be more efficient if already on device? 
+                # But here it is definitely host numpy.
+                d_arg = cp.array(arg)
+                
+                # We will use this device array for the kernel
+                # And we need to copy it back later to support in-place modifications
+                write_back_tasks.append((d_arg, arg))
+                
+                # Replace arg with device arg for subsequent processing
+                arg = d_arg
+            
             if i < len(params):
                 param_name, param_type = params[i]
             else:
@@ -286,7 +304,7 @@ extern "C" {{
             # Tensor support
             if param_type and param_type.is_tensor():
                  if not isinstance(arg, cp.ndarray):
-                     raise TypeError(f"Argument '{param_name}' must be a Cupy array (expected Tensor)")
+                     raise TypeError(f"Argument '{param_name}' must be a Cupy array (or Numpy array) (expected Tensor)")
                  
                  cuda_args.append(arg) # ptr
                  # Push shapes and strides
@@ -376,6 +394,21 @@ extern "C" {{
         
         # Запуск
         kernel(grid, block, tuple(cuda_args))
+        
+        # Write back changes to NumPy arrays (synchronize first)
+        if write_back_tasks:
+            cp.cuda.Stream.null.synchronize()
+            for d_arr, h_arr in write_back_tasks:
+                # In-place update of host array
+                # h_arr[:] = d_arr.get()  # .get() returns numpy array
+                try:
+                    # Optimize: use copyto?
+                    # np.copyto(h_arr, d_arr.get())
+                    # or element-wise assign
+                    h_arr[:] = d_arr.get()
+                except Exception as e:
+                    print(f"Warning: Failed to copy back NumPy array argument: {e}")
+
     
     # ========== Convenience methods ==========
     

@@ -131,3 +131,54 @@ def filter_positive(input: List[int32], output: List[int32]):
         if val > 0:
             output.append(val)
 ```
+
+## Decorators & Architecture
+
+The compiler uses decorators to distinguish between entry points (Kernels) and helper functions (Device functions).
+
+### `@cuda_compile` / `@kernel`
+Marks a function as a **CUDA Kernel** (`__global__ void`).
+
+*   **Entry Point**: These are the functions you call from Python to launch execution on the GPU.
+*   **Return Type**: Must always be `void`. Kernels cannot return values using `return`. To pass data back to the host, you must write to an output array passed as an argument.
+*   **Execution**: Runs in parallel on thousands of GPU threads.
+*   **Usage**:
+    ```python
+    @cuda_compile
+    def my_kernel(out: Array[int]):
+         out[0] = 42
+    ```
+
+### `@device`
+Marks a function as a **Device Function** (`__device__`).
+
+*   **Helper Function**: Can only be called from other kernels or device functions. Cannot be called from Python.
+*   **Return Type**: Can return any supported type (`int`, `float`, `Tuple`, `String`, etc.).
+*   **Memory Management**: Supports returning complex types with automatic memory management (Move Semantics).
+*   **Usage**:
+    ```python
+    @device
+    def compute_value(x: int) -> int:
+        return x * x
+
+    @cuda_compile
+    def kernel(out: Array[int]):
+        out[0] = compute_value(10)
+    ```
+
+### `compile_module`
+Used to compile a string containing multiple functions, classes, and shared logic. This is useful for defining helper functions marked with `@device` alongside your `@kernel`s.
+
+```python
+source = """
+@device
+def helper() -> int:
+    return 100
+
+@kernel
+def main_kernel(out: Array[int]):
+    out[0] = helper()
+"""
+program = compile_module(source)
+program.run('main_kernel', out_array)
+```

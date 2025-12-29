@@ -13,7 +13,7 @@ from types_ir import (
     IRReturn, IRBreak, IRContinue, IRExprStmt, IRBlock,
     IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
     IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
-    IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice,
+    IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice, IRArrayAlloc, IRDelete,
     BinaryOp, UnaryOp, CompareOp
 )
 
@@ -150,7 +150,41 @@ class CUDACodeGen:
         # Helper макросы
         lines.append('// Thread indexing helpers')
         lines.append('#define THREAD_ID (blockIdx.x * blockDim.x + threadIdx.x)')
+        lines.append('#define THREAD_ID (blockIdx.x * blockDim.x + threadIdx.x)')
         lines.append('#define GRID_STRIDE (blockDim.x * gridDim.x)')
+        lines.append('')
+        
+        # ScopedArray for automatic memory management (RAII)
+        lines.append("""
+template<typename T>
+struct ScopedArray {
+    T* ptr;
+    __device__ ScopedArray() : ptr(nullptr) {}
+    __device__ ScopedArray(T* p) : ptr(p) {}
+    __device__ ~ScopedArray() { if (ptr) delete[] ptr; }
+    
+    // Dissable copy to prevent double free
+    __device__ ScopedArray(const ScopedArray&) = delete;
+    __device__ ScopedArray& operator=(const ScopedArray&) = delete;
+
+    // Move semantics (simplified)
+    __device__ ScopedArray& operator=(T* p) { 
+        if (ptr) delete[] ptr; 
+        ptr = p; 
+        return *this; 
+    }
+    
+    __device__ T* release() {
+        T* p = ptr;
+        ptr = nullptr;
+        return p;
+    }
+
+    __device__ T& operator[](int i) { return ptr[i]; }
+    __device__ const T& operator[](int i) const { return ptr[i]; }
+    __device__ operator T*() { return ptr; }
+};
+""")
         lines.append('')
 
         # Собираем информацию о структурах
@@ -475,29 +509,84 @@ class CUDACodeGen:
                     self.array_sizes[param_name] = size_name
                     self.declared_vars.add(size_name)
         
-        params_str = ', '.join(params)
-        lines.append(f'{prefix} {return_type} {func_name}({params_str}) {{')
+        args_str = ', '.join(params)
+        lines.append(f'{prefix} {return_type} {func_name}({args_str}) {{')
         
         self.indent_level = 1
         
-        # Preamble (List reconstruction)
-        for line in preamble:
-            lines.append(line)
+        # Preamble (List reconstruction, etc)
+        for p in preamble:
+            lines.append(p)
         
-        # Объявляем локальные переменные
+        # Identify variables that are allocated arrays (owning)
+        # We scan assignments to find variables assigned from IRArrayAlloc
+        self.owning_arrays = set()
+        
+        def scan_owning(stmt: IRNode):
+            if isinstance(stmt, IRAssign):
+                if isinstance(stmt.value, IRArrayAlloc):
+                    if isinstance(stmt.target, IRVar):
+                        self.owning_arrays.add(stmt.target.name)
+            elif isinstance(stmt, IRIf):
+                for s in stmt.then_body: scan_owning(s)
+                for s in stmt.else_body: scan_owning(s)
+            elif isinstance(stmt, (IRFor, IRParallelFor, IRWhile)):
+                for s in stmt.body: scan_owning(s)
+            elif isinstance(stmt, IRBlock):
+                for s in stmt.statements: scan_owning(s)
+                
+        for stmt in func.body:
+             scan_owning(stmt)
+
+        # Объявление локальных переменных
         for var_name, var_type in func.local_vars.items():
-            if var_name not in self.declared_vars:
+            if var_name in self.declared_vars:
+                continue
+            
+            # Skip loop variables (they are declared in for loop usually, but check if we track them?)
+            # TypeInference puts them in local_vars.
+            # But gen_for declares them: for(int i=...)
+            # We should assume if it's INT and commonly used as loop var, we might skip declaration if it collides.
+            # But standard C declarations at top are safe if shadows or reused.
+            # However, `gen_for` uses `int var = ...`. Re-declaration is error.
+            # We should validly NOT declare it at top.
+            
+            # Simple heuristic: don't declare loop vars here?
+            # Or track loop vars in scan?
+            # Let's trust that if it is in local_vars, it needs declaration unless it is loop var.
+            # The user code `i` in loop is loop var.
+            
+            # Check if this var is owning array
+            if var_name in self.owning_arrays and var_type and (var_type.is_array() or var_type.is_pointer()):
+                # Declaring as ScopedArray<ElementType>
+                # var_type is T* (pointer to element)
+                elem_type = self.type_to_cuda(var_type.element_type) if var_type.element_type else 'float'
+                lines.append(f'{self.indent()}ScopedArray<{elem_type}> {var_name};')
+            else:
+                # Regular declaration
+                # Check for loop vars? To avoid re-definition error.
+                # Just declare them. If gen_for re-declares `int i`, it shadows `int i` at top scope.
+                # Valid in C++, though warning-prone.
+                
+                # Check if it was param?
+                param_names = [p[0] for p in func.params]
+                if var_name in param_names:
+                    continue
+
+                if var_name == 'self': continue
+
                 cuda_type = self.type_to_cuda(var_type)
                 lines.append(f'{self.indent()}{cuda_type} {var_name};')
-                self.declared_vars.add(var_name)
+            
+            self.declared_vars.add(var_name)
         
-        # Тело
+        # Тело функции (удаляем пустые строки для красоты)
         for stmt in func.body:
             code = self.gen_stmt(stmt)
             if code:
                 lines.append(code)
         
-        self.indent_level = 0
+        self.indent_level -= 1
         lines.append('}')
         
         self.current_function = None
@@ -529,6 +618,8 @@ class CUDACodeGen:
             return f'{self.indent()}{self.gen_expr(stmt.expr)};'
         elif isinstance(stmt, IRBlock):
             return self.gen_block(stmt)
+        elif isinstance(stmt, IRDelete):
+            return self.gen_delete(stmt)
         return ''
     
     def gen_assign(self, stmt: IRAssign) -> str:
@@ -625,14 +716,15 @@ class CUDACodeGen:
         var = stmt.var_name
         
         # Определяем размер
-        size_expr = self.gen_expr(stmt.size_expr)
-        if isinstance(stmt.size_expr, IRVar):
-            arr_name = stmt.size_expr.name
-            if arr_name in self.array_sizes:
-                size_expr = self.array_sizes[arr_name]
+        size_expr = stmt.size_expr
+        if size_expr is None:
+             # Try to find size from loop range
+             size_expr = IRBinOp(stmt.end, BinaryOp.SUB, stmt.start) # approx
         
-        # Grid-stride loop
-        lines.append(f'{self.indent()}for (int {var} = THREAD_ID; {var} < {size_expr}; {var} += GRID_STRIDE) {{')
+        size = self.gen_expr(size_expr)
+        
+        lines.append(f'{self.indent()}int _stride = GRID_STRIDE;')
+        lines.append(f'{self.indent()}for (int {var} = THREAD_ID; {var} < {size}; {var} += _stride) {{')
         
         self.indent_level += 1
         for s in stmt.body:
@@ -660,12 +752,62 @@ class CUDACodeGen:
         lines.append(f'{self.indent()}}}')
         return '\n'.join(lines)
     
+    def gen_move_expr(self, expr: IRNode) -> str:
+        """
+        Генерирует выражение с семантикой перемещения (move semantics) для return.
+        Если встречает ScopedArray переменную, вызывает .release().
+        """
+        if isinstance(expr, IRVar) and expr.name in self.owning_arrays:
+            return f'{expr.name}.release()'
+        
+        elif isinstance(expr, IRTupleInit):
+            elements = [self.gen_move_expr(e) for e in expr.elements]
+            return f'{expr.type.cuda_name}({", ".join(elements)})'
+        
+        elif isinstance(expr, IRStructInit):
+            # Struct init logic (similar to gen_struct_init but recursive move)
+            # Assuming implicit constructor usage or explicit?
+            # gen_struct_init currently not shown fully but likely uses constructor.
+            # Only if struct has constructor with fields.
+            # My generated structs don't seem to have constructor for fields by default unless Tuple?
+            # Wait, gen_struct generates POD struct.
+            # Initializer list: StructType{ f1, f2 }
+            # So we can use initializer list syntax.
+             args = []
+             # We need to know field order.
+             # We have expr.values (dict?) or list?
+             # IRStructInit definition:
+             # struct_name: str, values: Dict[str, IRNode]
+             # We need to look up struct definition to order fields.
+             struct_def = self.structs.get(expr.struct_name)
+             if struct_def:
+                 for field, _ in struct_def.fields:
+                     val = expr.values.get(field)
+                     if val:
+                         args.append(self.gen_move_expr(val))
+                     else:
+                         args.append('0') # Default?
+                 return f'{expr.struct_name}{{{", ".join(args)}}}'
+             return self.gen_expr(expr) # Fallback
+
+        elif isinstance(expr, IROptionalInit):
+             if expr.value is None:
+                 return f'{expr.type.cuda_name}()'
+             val = self.gen_move_expr(expr.value)
+             return f'{expr.type.cuda_name}({val})'
+
+        # Default to normal gen_expr for others
+        return self.gen_expr(expr)
+
     def gen_return(self, stmt: IRReturn) -> str:
         """Генерирует return."""
         if stmt.value:
             if self.current_function and self.current_function.is_kernel:
                 raise CodeGenError("CUDA kernels cannot return values. Please use output arrays (arguments).")
-            return f'{self.indent()}return {self.gen_expr(stmt.value)};'
+            
+            # Use move semantics for return value to support ScopedArray release within tuples/structs
+            val = self.gen_move_expr(stmt.value)
+            return f'{self.indent()}return {val};'
         return f'{self.indent()}return;'
     
     def gen_block(self, stmt: IRBlock) -> str:
@@ -680,6 +822,40 @@ class CUDACodeGen:
         self.indent_level -= 1
         lines.append(f'{self.indent()}}}')
         return '\n'.join(lines)
+    
+    def gen_delete(self, stmt: IRDelete) -> str:
+        """Генерирует delete."""
+        target = self.gen_expr(stmt.target)
+        
+        # Determine if we should use delete or delete[]
+        # Based on type. 
+        # If unknown, default to delete[] for pointer safety if allocated with new[]?
+        # Actually delete[] is required for new[].
+        # Arrays are pointers.
+        # But single objects are also pointers (structs).
+        # We need rigorous type checking.
+        
+        is_array = False
+        if stmt.target.type:
+             # Check if it is a pointer to an array?
+             # IRArrayAlloc returns pointer to ElementType.
+             # So it's just a T*. 
+             # In C++, T* can be array or single object.
+             # We assume del is used for arrays if it's a pointer.
+             # IF the user allocated with new T(), they should use del?
+             # For now, let's look at type kind.
+             # If it points to a Struct, maybe single object?
+             # But we can create array of structs.
+             # Convention: del x -> delete[] x;
+             # Unless we know for sure it's a single object?
+             # If we want to support both, we might need syntax or tracking.
+             # Given numpy arrays are the main dynamic allocation, delete[] is safer default.
+             is_array = True
+        
+        if is_array:
+            return f'{self.indent()}delete[] {target};'
+        else:
+            return f'{self.indent()}delete {target};'
     
     def gen_expr(self, expr: IRNode) -> str:
         """Генерирует выражение."""
@@ -718,6 +894,8 @@ class CUDACodeGen:
             return self.gen_tensor_slice(expr)
         elif isinstance(expr, IROptionalInit):
             return self.gen_optional_init(expr)
+        elif isinstance(expr, IRArrayAlloc):
+            return self.gen_array_alloc(expr)
         
         return '/* unknown */'
     
@@ -915,6 +1093,28 @@ class CUDACodeGen:
         """Генерирует инициализацию массива."""
         elements = [self.gen_expr(e) for e in expr.elements]
         return f'{{{", ".join(elements)}}}'
+    
+    def gen_array_alloc(self, expr: IRArrayAlloc) -> str:
+        """Generates dynamic array allocation (malloc/new)."""
+        cuda_type = self.type_to_cuda(expr.element_type)
+        
+        # np.zeros / np.empty
+        if expr.values is None:
+             size = self.gen_expr(expr.size)
+             if expr.zero_init:
+                 return f'new {cuda_type}[{size}]()'
+             else:
+                 return f'new {cuda_type}[{size}]'
+        
+        # np.array([values])
+        # C++11 initializer list: new int[3]{1, 2, 3}
+        if expr.values:
+             size = len(expr.values)
+             values = [self.gen_expr(v) for v in expr.values]
+             return f'new {cuda_type}[{size}]{{{", ".join(values)}}}'
+        
+        return "NULL"
+
     
     def gen_struct_init(self, expr: IRStructInit) -> str:
         """Генерирует инициализацию структуры."""

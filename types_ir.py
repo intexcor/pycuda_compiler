@@ -586,3 +586,28 @@ class IRTensorSlice(IRNode):
     # Metadata for aliasing
     base_name: Optional[str] = None
     dim_offset: int = 0
+
+
+@dataclass
+class IRArrayAlloc(IRNode):
+    """Выделение памяти под массив (np.zeros, np.empty)."""
+    kind: IRNodeKind = IRNodeKind.ARRAY_INIT # Reusing ARRAY_INIT kind or adding new one?
+    # Actually let's use a new kind to differentiate from literal init
+    # But I can't easily add enum member without re-writing Enum class
+    # So I will define it as subclass but use ARRAY_INIT kind for now, or use generic CALL
+    # modifying enum is hard with replace_file_content if I don't replace the whole enum block.
+    # IRNodeKind is an Enum.
+    # I can just use a unique ID or reuse ARRAY_INIT and distinguish by class type.
+    
+    size: IRNode = None
+    element_type: CUDAType = None
+    zero_init: bool = False # for np.zeros
+    values: Optional[List[IRNode]] = None # for np.array([1, 2])
+
+
+@dataclass
+class IRDelete(IRNode):
+    """Освобождение памяти (delete[])."""
+    kind: IRNodeKind = IRNodeKind.EXPR_STMT # Mock kind or reuse one
+    target: IRNode = None
+

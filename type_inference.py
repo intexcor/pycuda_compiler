@@ -13,7 +13,7 @@ from types_ir import (
     IRReturn, IRExprStmt, IRBlock,
     IRConst, IRVar, IRBinOp, IRUnaryOp, IRCompare,
     IRCall, IRMethodCall, IRIndex, IRAttr, IRTernary, IRCast,
-    IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice, BinaryOp, UnaryOp
+    IRArrayInit, IRTupleInit, IROptionalInit, IRStructInit, IRTensorSlice, IRArrayAlloc, IRDelete, BinaryOp, UnaryOp
 )
 
 
@@ -161,6 +161,8 @@ class TypeInference:
         elif isinstance(stmt, IRBlock):
             for s in stmt.statements:
                 self.infer_stmt(s)
+        elif isinstance(stmt, IRDelete):
+            self.infer_expr(stmt.target)
     
     def infer_assign(self, stmt: IRAssign):
         """Выводит тип для присваивания."""
@@ -303,10 +305,11 @@ class TypeInference:
             return self.infer_tuple_init(expr)
             
         elif isinstance(expr, IROptionalInit):
-            return self.infer_optional_init(expr)
-        
+            self.infer_optional_init(expr)
         elif isinstance(expr, IRStructInit):
-            return self.infer_struct_init(expr)
+            self.infer_struct_init(expr)
+        elif isinstance(expr, IRArrayAlloc):
+            self.infer_array_alloc(expr)
         
         elif isinstance(expr, IRTensorSlice):
             return self.infer_tensor_slice(expr)
@@ -534,6 +537,21 @@ class TypeInference:
             elem_type = self.infer_expr(expr.elements[0]) or FLOAT32
         
         expr.type = elem_type.array_of(len(expr.elements))
+        return expr.type
+
+    def infer_array_alloc(self, expr: IRArrayAlloc) -> Optional[CUDAType]:
+        """Выводит тип выделения массива (malloc/new)."""
+        self.infer_expr(expr.size)
+        if expr.values:
+            for v in expr.values:
+                 self.infer_expr(v)
+        
+        if expr.element_type:
+            # Return pointer to element type (as new[] returns pointer)
+            expr.type = expr.element_type.pointer_to()
+        else:
+            expr.type = FLOAT32.pointer_to()
+            
         return expr.type
 
     def infer_tuple_init(self, expr: IRTupleInit) -> Optional[CUDAType]:
